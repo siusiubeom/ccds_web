@@ -1,0 +1,77 @@
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider  = "postgresql"
+  url       = env("DATABASE_URL")
+  directUrl = env("DIRECT_URL")
+}
+
+enum UserRole {
+  USER
+  ADMIN
+}
+
+enum UserStatus {
+  PENDING
+  APPROVED
+  REJECTED
+}
+
+enum SampleSource {
+  USER
+  REFERENCE
+  IMPORT
+}
+
+model User {
+  id           String     @id @default(cuid())
+  email        String     @unique
+  passwordHash String
+  name         String?
+  role         UserRole   @default(USER)
+  status       UserStatus @default(PENDING)
+  createdAt    DateTime   @default(now())
+  updatedAt    DateTime   @updatedAt
+
+  approvedById String?
+  approvedBy   User?      @relation("Approvals", fields: [approvedById], references: [id])
+  approved     User[]     @relation("Approvals")
+
+  samples      Sample[]
+}
+
+model Sample {
+  id        String       @id @default(cuid())
+  userId    String?
+  user      User?        @relation(fields: [userId], references: [id])
+
+  rbp4      Float?
+  cxcl10    Float
+  nox4      Float
+  ccdrOri   Int?
+  label     Int?
+  source    SampleSource @default(USER)
+  group     String?
+  createdAt DateTime     @default(now())
+
+  @@index([source])
+  @@index([userId])
+}
+
+model RiskModel {
+  id          String   @id @default(cuid())
+  version     Int      @unique
+  thresholds  Json
+  active      Boolean  @default(false)
+  note        String?
+  createdById String?
+  createdAt   DateTime @default(now())
+}
+
+model KeepAlive {
+  id       String   @id @default(cuid())
+  token    String
+  pingedAt DateTime @default(now())
+}
