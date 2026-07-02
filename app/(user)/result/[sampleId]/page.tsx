@@ -62,13 +62,19 @@ export default async function ResultPage({
         </div>
       </div>
 
-      {sample.group && (
+      {sample.group ? (
         <ResultCharts
           group={sample.group as RiskGroup}
           cxcl10={sample.cxcl10}
           nox4={sample.nox4}
           refPoints={refs}
         />
+      ) : (
+        <div className="bg-amber-50 border border-amber-200 rounded-xl p-6 text-amber-800 text-sm">
+          <strong className="block mb-1">This sample does not fall within any defined risk category.</strong>
+          The CXCL10 / NOX4 values are outside the ranges covered by the current risk model.
+          The sample has been stored for future model updates.
+        </div>
       )}
     </div>
   );

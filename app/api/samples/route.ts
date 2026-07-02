@@ -26,16 +26,10 @@ export async function POST(req: NextRequest) {
 
   const { cxcl10, nox4, rbp4, ccdrOri, save } = parsed.data;
   const result = classify(cxcl10, nox4);
-  if (!result) {
-    return NextResponse.json(
-      { error: "Sample does not fit any risk category. Please check your values." },
-      { status: 422 }
-    );
-  }
+  const group  = result?.group ?? null;
 
   if (!save) {
-    // Classification only — no DB write
-    return NextResponse.json({ id: null, group: result.group, saved: false }, { status: 200 });
+    return NextResponse.json({ id: null, group, saved: false }, { status: 200 });
   }
 
   const sample = await prisma.sample.create({
@@ -44,11 +38,11 @@ export async function POST(req: NextRequest) {
       nox4,
       rbp4,
       ccdrOri,
-      group: result.group,
+      group,
       source: "USER",
       userId: session.user.id,
     },
   });
 
-  return NextResponse.json({ id: sample.id, group: result.group, saved: true }, { status: 201 });
+  return NextResponse.json({ id: sample.id, group, saved: true }, { status: 201 });
 }

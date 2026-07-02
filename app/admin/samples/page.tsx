@@ -2,6 +2,8 @@
 
 import { useCallback, useEffect, useRef, useState } from "react";
 
+type Source = "ALL" | "USER" | "IMPORT" | "REFERENCE";
+
 interface Sample {
   id: string;
   cxcl10: number;
@@ -20,7 +22,10 @@ const groupColor: Record<string, string> = {
   Normal:   "bg-green-100 text-green-700",
 };
 
+const TABS: Source[] = ["ALL", "USER", "IMPORT", "REFERENCE"];
+
 export default function AdminSamplesPage() {
+  const [tab, setTab]             = useState<Source>("ALL");
   const [samples, setSamples]     = useState<Sample[]>([]);
   const [loading, setLoading]     = useState(true);
   const [error, setError]         = useState("");
@@ -29,10 +34,11 @@ export default function AdminSamplesPage() {
   const [importMsg, setImportMsg] = useState("");
   const fileRef = useRef<HTMLInputElement>(null);
 
-  const load = useCallback(() => {
+  const load = useCallback((src: Source) => {
     setLoading(true);
     setError("");
-    fetch("/api/admin/samples")
+    const q = src === "ALL" ? "" : `?source=${src}`;
+    fetch(`/api/admin/samples${q}`)
       .then(r => {
         if (!r.ok) throw new Error(`HTTP ${r.status}`);
         return r.json();
@@ -41,12 +47,12 @@ export default function AdminSamplesPage() {
       .catch(e => { setError(String(e)); setLoading(false); });
   }, []);
 
-  useEffect(() => { load(); }, [load]);
+  useEffect(() => { load(tab); }, [load, tab]);
 
   async function handleDelete(id: string) {
     setDeleting(id);
     await fetch(`/api/admin/samples/${id}`, { method: "DELETE" });
-    load();
+    load(tab);
     setDeleting(null);
   }
 
@@ -57,12 +63,12 @@ export default function AdminSamplesPage() {
     setImportMsg("");
     const body = new FormData();
     body.append("file", file);
-    const res = await fetch("/api/admin/samples/import", { method: "POST", body });
+    const res  = await fetch("/api/admin/samples/import", { method: "POST", body });
     const data = await res.json();
     setImportMsg(res.ok
       ? `Imported ${data.imported} rows. Skipped ${data.skipped}.`
       : `Error: ${data.error}`);
-    if (res.ok) load();
+    if (res.ok) load(tab);
     setImporting(false);
     if (fileRef.current) fileRef.current.value = "";
   }
@@ -91,6 +97,23 @@ export default function AdminSamplesPage() {
         </div>
       </div>
 
+      {/* Source filter tabs */}
+      <div className="flex gap-1 mb-4 border-b">
+        {TABS.map(t => (
+          <button
+            key={t}
+            onClick={() => setTab(t)}
+            className={`px-4 py-2 text-sm font-medium rounded-t transition-colors ${
+              tab === t
+                ? "bg-white border border-b-white border-gray-200 text-blue-700 -mb-px"
+                : "text-gray-500 hover:text-gray-700"
+            }`}
+          >
+            {t === "ALL" ? "All" : t.charAt(0) + t.slice(1).toLowerCase()}
+          </button>
+        ))}
+      </div>
+
       <p className="text-xs text-gray-400 mb-4">
         Required CSV columns: <code className="bg-gray-100 px-1 rounded">cxcl10</code>,{" "}
         <code className="bg-gray-100 px-1 rounded">nox4</code> · Optional:{" "}
@@ -103,7 +126,7 @@ export default function AdminSamplesPage() {
       {error   && <p className="text-red-600 text-sm">Failed to load: {error}</p>}
 
       {!loading && !error && samples.length === 0 && (
-        <p className="text-gray-500">No user or imported samples yet.</p>
+        <p className="text-gray-500">No {tab === "ALL" ? "" : tab.toLowerCase() + " "}samples yet.</p>
       )}
 
       {!loading && samples.length > 0 && (
@@ -151,20 +174,22 @@ export default function AdminSamplesPage() {
                     {new Date(s.createdAt).toLocaleDateString()}
                   </td>
                   <td className="px-4 py-3">
-                    <button
-                      onClick={() => handleDelete(s.id)}
-                      disabled={deleting === s.id}
-                      className="text-red-500 hover:text-red-700 text-xs font-medium disabled:opacity-40"
-                    >
-                      {deleting === s.id ? "…" : "Delete"}
-                    </button>
+                    {s.source !== "REFERENCE" && (
+                      <button
+                        onClick={() => handleDelete(s.id)}
+                        disabled={deleting === s.id}
+                        className="text-red-500 hover:text-red-700 text-xs font-medium disabled:opacity-40"
+                      >
+                        {deleting === s.id ? "…" : "Delete"}
+                      </button>
+                    )}
                   </td>
                 </tr>
               ))}
             </tbody>
           </table>
           <p className="text-xs text-gray-400 px-4 py-2 border-t">
-            Showing up to 200 most recent samples.
+            Showing up to 500 most recent. {samples.length} rows.
           </p>
         </div>
       )}

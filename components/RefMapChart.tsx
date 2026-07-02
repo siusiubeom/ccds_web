@@ -1,17 +1,21 @@
 "use client";
 
 import { useCallback, useEffect, useRef, useState } from "react";
-import Script from "next/script";
 
 interface RefPoint { cxcl10: number; nox4: number; }
-interface Props { cxcl10: number; nox4: number; refPoints: RefPoint[]; }
+interface Props    { cxcl10: number; nox4: number; refPoints: RefPoint[]; }
+
+const PYSCRIPT_VERSION = "2024.11.1";
+const PYSCRIPT_BASE    = `https://pyscript.net/releases/${PYSCRIPT_VERSION}`;
 
 export default function RefMapChart({ cxcl10, nox4, refPoints }: Props) {
-  const [loaded, setLoaded] = useState(false);
-  const outputRef = useRef<HTMLDivElement>(null);
+  const [status, setStatus]   = useState<"loading" | "done" | "error">("loading");
+  const [errMsg, setErrMsg]   = useState("");
+  const outputRef             = useRef<HTMLDivElement>(null);
+  const initialised           = useRef(false);
 
-  // Run after PyScript interpreter + packages are ready
-  const afterPyReady = useCallback(() => {
+  // Inject the <script type="py"> after PyScript + packages are ready
+  const runChart = useCallback(() => {
     if (document.getElementById("ccds-refmap-py")) return;
 
     const win = window as unknown as Record<string, unknown>;
@@ -19,69 +23,99 @@ export default function RefMapChart({ cxcl10, nox4, refPoints }: Props) {
     win.ccds_nox4       = nox4;
     win.ccds_ref_points = refPoints;
 
-    const script = document.createElement("script");
-    script.type = "py";
-    script.id   = "ccds-refmap-py";
-    script.setAttribute("src", "/py/charts.py");
-    document.body.appendChild(script);
+    const s  = document.createElement("script");
+    s.type   = "py";
+    s.id     = "ccds-refmap-py";
+    s.setAttribute("src", "/py/charts.py");
+    document.body.appendChild(s);
   }, [cxcl10, nox4, refPoints]);
 
-  // core.js onLoad → wait for py:ready (async Pyodide init + package download)
-  const onCoreLoad = useCallback(() => {
-    // If pyscript is already available on window, interpreter is ready
-    if ((window as unknown as Record<string, unknown>).pyscript) {
-      afterPyReady();
-    } else {
-      document.addEventListener("py:ready", afterPyReady, { once: true });
-    }
-  }, [afterPyReady]);
-
-  // Watch the output div for children to know when the chart rendered
+  // Bootstrap PyScript: py-config → css → core.js  (in that DOM order)
   useEffect(() => {
-    if (!outputRef.current) return;
+    if (initialised.current) return;
+    initialised.current = true;
+
+    // 1. <py-config> must be in the DOM BEFORE core.js evaluates
+    if (!document.getElementById("ccds-py-config")) {
+      const cfg = document.createElement("py-config");
+      cfg.id    = "ccds-py-config";
+      cfg.setAttribute("type", "json");
+      cfg.textContent = JSON.stringify({ packages: ["numpy", "matplotlib"] });
+      // Prepend to body so it appears before any script tags
+      document.body.insertBefore(cfg, document.body.firstChild);
+    }
+
+    // 2. PyScript CSS
+    if (!document.getElementById("ccds-pyscript-css")) {
+      const lnk  = document.createElement("link");
+      lnk.id     = "ccds-pyscript-css";
+      lnk.rel    = "stylesheet";
+      lnk.href   = `${PYSCRIPT_BASE}/core.css`;
+      document.head.appendChild(lnk);
+    }
+
+    // 3. Listen for ready BEFORE loading core.js (never miss the event)
+    document.addEventListener("py:ready", runChart, { once: true });
+
+    // 4. Load PyScript core — fire-and-forget if already loaded
+    if (!document.getElementById("ccds-pyscript-core")) {
+      const core  = document.createElement("script");
+      core.id     = "ccds-pyscript-core";
+      core.type   = "module";
+      core.src    = `${PYSCRIPT_BASE}/core.js`;
+      document.head.appendChild(core);
+    } else {
+      // core.js already loaded; if interpreter is up, run immediately
+      if ((window as unknown as Record<string, unknown>).pyscript) {
+        runChart();
+      }
+      // else our py:ready listener above will fire when ready
+    }
+  }, [runChart]);
+
+  // MutationObserver: hide spinner when output div gets any content
+  useEffect(() => {
+    const el = outputRef.current;
+    if (!el) return;
     const obs = new MutationObserver(() => {
-      if (outputRef.current && outputRef.current.childElementCount > 0) {
-        setLoaded(true);
+      if (el.childNodes.length > 0) {
+        setStatus("done");
         obs.disconnect();
       }
     });
-    obs.observe(outputRef.current, { childList: true, subtree: true });
+    obs.observe(el, { childList: true, subtree: true });
     return () => obs.disconnect();
+  }, []);
+
+  // Timeout fallback so the user gets feedback if packages fail to download
+  useEffect(() => {
+    const t = setTimeout(() => {
+      setStatus(s => {
+        if (s === "loading") {
+          setErrMsg("Timed out — numpy/matplotlib may have failed to download. Check browser Console (F12) for details.");
+          return "error";
+        }
+        return s;
+      });
+    }, 210_000); // 3.5 minutes
+    return () => clearTimeout(t);
   }, []);
 
   return (
     <div>
-      {/*
-        <py-config> must be in the DOM *before* core.js initialises so Pyodide
-        downloads numpy + matplotlib during its startup phase.
-        type="json" tells PyScript to parse as JSON, not TOML.
-      */}
-      <div
-        dangerouslySetInnerHTML={{
-          __html: '<py-config type="json">{"packages":["numpy","matplotlib"]}</py-config>',
-        }}
-      />
-      <link
-        rel="stylesheet"
-        href="https://pyscript.net/releases/2024.11.1/core.css"
-      />
-      <Script
-        type="module"
-        src="https://pyscript.net/releases/2024.11.1/core.js"
-        strategy="afterInteractive"
-        onLoad={onCoreLoad}
-      />
-      {!loaded && (
+      {status === "loading" && (
         <div className="flex items-start gap-3 text-gray-500 text-sm py-6">
           <span className="mt-0.5 animate-spin w-4 h-4 border-2 border-blue-400 border-t-transparent rounded-full inline-block shrink-0" />
           <span>
             Loading Python runtime…{" "}
             <span className="text-gray-400 text-xs">
-              numpy + matplotlib download ~30–60 s on first visit; cached after that.
-              If stuck beyond 3 min, check browser DevTools → Console.
+              numpy + matplotlib are downloaded from the Pyodide CDN (~30–60 s on first visit; cached after).
             </span>
           </span>
         </div>
+      )}
+      {status === "error" && (
+        <p className="text-red-600 text-sm py-4">{errMsg}</p>
       )}
       <div id="ref-map-output" ref={outputRef} />
     </div>
